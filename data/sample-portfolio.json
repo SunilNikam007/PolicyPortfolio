@@ -1,0 +1,41 @@
+{
+  "policies": [
+    {
+      "policyId": "POL-001",
+      "holderName": "Jane Smith",
+      "monthlyPremium": 450.00,
+      "status": "Active",
+      "claims": [
+        { "claimId": "CLM-1001", "amount": 1200.00, "status": "Approved", "dateRaised": "2024-03-15" },
+        { "claimId": "CLM-1002", "amount": 800.00,  "status": "Pending",  "dateRaised": "2024-06-22" },
+        { "claimId": "CLM-1003", "amount": 500.00,  "status": "Approved", "dateRaised": "2024-01-01" },
+        { "claimId": "CLM-1004", "amount": 300.00,  "status": "Approved", "dateRaised": "2024-12-31" }
+      ]
+    },
+    {
+      "policyId": "POL-002",
+      "holderName": "Peter van der Merwe",
+      "monthlyPremium": 320.50,
+      "status": "Lapsed",
+      "claims": [
+        { "claimId": "CLM-2001", "amount": 1500.00, "status": "Approved", "dateRaised": "2024-08-10" }
+      ]
+    },
+    {
+      "policyId": "POL-003",
+      "holderName": "Aaliyah Patel",
+      "monthlyPremium": 675.75,
+      "status": "Active",
+      "claims": []
+    },
+    {
+      "policyId": "POL-004",
+      "holderName": "David Okafor",
+      "monthlyPremium": 220.00,
+      "status": "Cancelled",
+      "claims": [
+        { "claimId": "CLM-4001", "amount": 200.00, "status": "Rejected", "dateRaised": "2024-05-18" }
+      ]
+    }
+  ]
+}

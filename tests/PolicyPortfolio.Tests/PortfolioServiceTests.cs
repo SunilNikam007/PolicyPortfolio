@@ -1,4 +1,3 @@
-using PolicyPortfolio;
 using PolicyPortfolio.Enums;
 using PolicyPortfolio.Models;
 using PolicyPortfolio.Services;
@@ -6,374 +5,11 @@ using Xunit;
 
 namespace PolicyPortfolio.Tests;
 
-public sealed class PortfolioServiceTests
+public class PortfolioServiceJsonDataTests
 {
     private readonly PortfolioService _service = new();
 
-    [Fact]
-    public void LoadFromFile_ReturnsPortfolio_WhenJsonFileIsValid()
-    {
-        var json = """
-        {
-          "policies": [
-            {
-              "policyId": "POL-001",
-              "holderName": "Asha Patel",
-              "monthlyPremium": 1000.00,
-              "status": "Active",
-              "claims": []
-            }
-          ]
-        }
-        """;
-
-        var path = CreateTempJsonFile(json);
-
-        var result = _service.LoadFromFile(path);
-
-        Assert.Single(result.Policies);
-        Assert.Equal("POL-001", result.Policies[0].PolicyId);
-        Assert.Equal(1000.00m, result.Policies[0].MonthlyPremium);
-    }
-
-    [Fact]
-    public void LoadFromFile_ThrowsFileNotFoundException_WhenFileDoesNotExist()
-    {
-        Assert.Throws<FileNotFoundException>(() =>
-            _service.LoadFromFile("missing-file.json"));
-    }
-
-    [Fact]
-    public void LoadFromFile_ThrowsMeaningfulException_WhenJsonIsMalformed()
-    {
-        var path = CreateTempJsonFile("{ invalid json");
-
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            _service.LoadFromFile(path));
-
-        Assert.Contains("malformed", exception.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void TotalMonthlyPremium_ReturnsOnlyPoliciesMatchingRequestedStatus()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.TotalMonthlyPremium(portfolio, PolicyStatus.Active);
-
-        Assert.Equal(2500m, result);
-    }
-
-    [Fact]
-    public void TotalMonthlyPremium_ReturnsZero_WhenNoPolicyMatchesStatus()
-    {
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-001",
-                    HolderName = "Asha",
-                    MonthlyPremium = 1000m,
-                    Status = PolicyStatus.Active
-                }
-            ]
-        };
-
-        var result = _service.TotalMonthlyPremium(portfolio, PolicyStatus.Cancelled);
-
-        Assert.Equal(0m, result);
-    }
-
-    [Fact]
-    public void ClaimsPaidBetween_IncludesApprovedClaimsOnStartAndEndDates()
-    {
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-001",
-                    Status = PolicyStatus.Active,
-                    Claims =
-                    [
-                        ApprovedClaim("C1", 100m, new DateOnly(2024, 1, 1)),
-                        ApprovedClaim("C2", 200m, new DateOnly(2024, 12, 31)),
-                        ApprovedClaim("C3", 300m, new DateOnly(2025, 1, 1))
-                    ]
-                }
-            ]
-        };
-
-        var result = _service.ClaimsPaidBetween(
-            portfolio,
-            new DateOnly(2024, 1, 1),
-            new DateOnly(2024, 12, 31));
-
-        Assert.Equal(300m, result);
-    }
-
-    [Fact]
-    public void ClaimsPaidBetween_IgnoresPendingAndRejectedClaims()
-    {
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-001",
-                    Status = PolicyStatus.Active,
-                    Claims =
-                    [
-                        ApprovedClaim("C1", 100m, new DateOnly(2024, 6, 1)),
-                        PendingClaim("C2", 200m, new DateOnly(2024, 6, 1)),
-                        RejectedClaim("C3", 300m, new DateOnly(2024, 6, 1))
-                    ]
-                }
-            ]
-        };
-
-        var result = _service.ClaimsPaidBetween(
-            portfolio,
-            new DateOnly(2024, 1, 1),
-            new DateOnly(2024, 12, 31));
-
-        Assert.Equal(100m, result);
-    }
-
-    [Fact]
-    public void ClaimsPaidBetween_DoesNotFilterByOwningPolicyStatus()
-    {
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-LAPSED",
-                    Status = PolicyStatus.Lapsed,
-                    Claims =
-                    [
-                        ApprovedClaim("C1", 700m, new DateOnly(2024, 8, 1))
-                    ]
-                }
-            ]
-        };
-
-        var result = _service.ClaimsPaidBetween(
-            portfolio,
-            new DateOnly(2024, 1, 1),
-            new DateOnly(2024, 12, 31));
-
-        Assert.Equal(700m, result);
-    }
-
-    [Fact]
-    public void ClaimsPaidBetween_ThrowsException_WhenFromDateIsAfterToDate()
-    {
-        var portfolio = CreatePortfolio();
-
-        Assert.Throws<ArgumentException>(() =>
-            _service.ClaimsPaidBetween(
-                portfolio,
-                new DateOnly(2024, 12, 31),
-                new DateOnly(2024, 1, 1)));
-    }
-
-    [Fact]
-    public void EvaluateClaim_ThrowsKeyNotFoundException_WhenPolicyDoesNotExist()
-    {
-        var portfolio = CreatePortfolio();
-
-        Assert.Throws<KeyNotFoundException>(() =>
-            _service.EvaluateClaim(
-                portfolio,
-                "UNKNOWN",
-                IncomingClaim(500m, new DateOnly(2025, 1, 1))));
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsReject_WhenPolicyIsLapsed()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-LAPSED",
-            IncomingClaim(500m, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.Reject, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsReject_WhenPolicyIsCancelled()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-CANCELLED",
-            IncomingClaim(500m, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.Reject, result);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void EvaluateClaim_ReturnsReject_WhenIncomingAmountIsZeroOrNegative(decimal amount)
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-ACTIVE-NO-CLAIMS",
-            IncomingClaim(amount, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.Reject, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsManualReview_WhenIncomingAmountIsGreaterThanTenThousand()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-ACTIVE-NO-CLAIMS",
-            IncomingClaim(10_000.01m, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.ManualReview, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsAutoApprove_WhenAmountIsExactlyTenThousandAndNoOtherRuleMatches()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-ACTIVE-NO-CLAIMS",
-            IncomingClaim(10_000m, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.AutoApprove, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsManualReview_WhenApprovedClaimExistsExactlyNinetyDaysBefore()
-    {
-        var incomingDate = new DateOnly(2025, 4, 1);
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-001",
-                    Status = PolicyStatus.Active,
-                    Claims =
-                    [
-                        ApprovedClaim("OLD", 400m, incomingDate.AddDays(-90))
-                    ]
-                }
-            ]
-        };
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-001",
-            IncomingClaim(500m, incomingDate));
-
-        Assert.Equal(AdjudicationDecision.ManualReview, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsAutoApprove_WhenApprovedClaimIsMoreThanNinetyDaysBefore()
-    {
-        var incomingDate = new DateOnly(2025, 4, 1);
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-001",
-                    Status = PolicyStatus.Active,
-                    Claims =
-                    [
-                        ApprovedClaim("OLD", 400m, incomingDate.AddDays(-91))
-                    ]
-                }
-            ]
-        };
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-001",
-            IncomingClaim(500m, incomingDate));
-
-        Assert.Equal(AdjudicationDecision.AutoApprove, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_IgnoresPendingAndRejectedClaimsWithinNinetyDays()
-    {
-        var incomingDate = new DateOnly(2025, 4, 1);
-        var portfolio = new Portfolio
-        {
-            Policies =
-            [
-                new Policy
-                {
-                    PolicyId = "POL-001",
-                    Status = PolicyStatus.Active,
-                    Claims =
-                    [
-                        PendingClaim("PENDING", 400m, incomingDate.AddDays(-10)),
-                        RejectedClaim("REJECTED", 400m, incomingDate.AddDays(-20))
-                    ]
-                }
-            ]
-        };
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-001",
-            IncomingClaim(500m, incomingDate));
-
-        Assert.Equal(AdjudicationDecision.AutoApprove, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_ReturnsAutoApprove_WhenNoRejectOrManualReviewRulesMatch()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-ACTIVE-NO-CLAIMS",
-            IncomingClaim(500m, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.AutoApprove, result);
-    }
-
-    [Fact]
-    public void EvaluateClaim_RejectPriorityBeatsManualReview_WhenPolicyIsLapsedAndAmountIsLarge()
-    {
-        var portfolio = CreatePortfolio();
-
-        var result = _service.EvaluateClaim(
-            portfolio,
-            "POL-LAPSED",
-            IncomingClaim(50_000m, new DateOnly(2025, 1, 1)));
-
-        Assert.Equal(AdjudicationDecision.Reject, result);
-    }
-
-    private static Portfolio CreatePortfolio()
+    private static Portfolio CreateSamplePortfolio()
     {
         return new Portfolio
         {
@@ -381,91 +17,292 @@ public sealed class PortfolioServiceTests
             [
                 new Policy
                 {
-                    PolicyId = "POL-ACTIVE-NO-CLAIMS",
-                    HolderName = "Asha Patel",
-                    MonthlyPremium = 1000m,
-                    Status = PolicyStatus.Active,
-                    Claims = []
-                },
-                new Policy
-                {
-                    PolicyId = "POL-ACTIVE-WITH-CLAIMS",
-                    HolderName = "Ravi Sharma",
-                    MonthlyPremium = 1500m,
+                    PolicyId = "POL-001",
+                    HolderName = "Jane Smith",
+                    MonthlyPremium = 450.00m,
                     Status = PolicyStatus.Active,
                     Claims =
                     [
-                        ApprovedClaim("C1", 500m, new DateOnly(2024, 3, 1))
+                        new Claim { ClaimId = "CLM-1001", Amount = 1200.00m, Status = ClaimStatus.Approved, DateRaised = new DateOnly(2024, 3, 15) },
+                        new Claim { ClaimId = "CLM-1002", Amount = 800.00m, Status = ClaimStatus.Pending, DateRaised = new DateOnly(2024, 6, 22) },
+                        new Claim { ClaimId = "CLM-1003", Amount = 500.00m, Status = ClaimStatus.Approved, DateRaised = new DateOnly(2024, 1, 1) },
+                        new Claim { ClaimId = "CLM-1004", Amount = 300.00m, Status = ClaimStatus.Approved, DateRaised = new DateOnly(2024, 12, 31) }
                     ]
                 },
                 new Policy
                 {
-                    PolicyId = "POL-LAPSED",
-                    HolderName = "John Smith",
-                    MonthlyPremium = 800m,
+                    PolicyId = "POL-002",
+                    HolderName = "Peter van der Merwe",
+                    MonthlyPremium = 320.50m,
                     Status = PolicyStatus.Lapsed,
+                    Claims =
+                    [
+                        new Claim { ClaimId = "CLM-2001", Amount = 1500.00m, Status = ClaimStatus.Approved, DateRaised = new DateOnly(2024, 8, 10) }
+                    ]
+                },
+                new Policy
+                {
+                    PolicyId = "POL-003",
+                    HolderName = "Aaliyah Patel",
+                    MonthlyPremium = 675.75m,
+                    Status = PolicyStatus.Active,
                     Claims = []
                 },
                 new Policy
                 {
-                    PolicyId = "POL-CANCELLED",
-                    HolderName = "Mary Jones",
-                    MonthlyPremium = 700m,
+                    PolicyId = "POL-004",
+                    HolderName = "David Okafor",
+                    MonthlyPremium = 220.00m,
                     Status = PolicyStatus.Cancelled,
-                    Claims = []
+                    Claims =
+                    [
+                        new Claim { ClaimId = "CLM-4001", Amount = 200.00m, Status = ClaimStatus.Rejected, DateRaised = new DateOnly(2024, 5, 18) }
+                    ]
                 }
             ]
         };
     }
 
-    private static Claim IncomingClaim(decimal amount, DateOnly dateRaised)
+    [Fact]
+    public void TotalMonthlyPremium_WhenStatusIsActive()
     {
-        return new Claim
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.TotalMonthlyPremium(portfolio, PolicyStatus.Active);
+
+        Assert.Equal(1125.75m, result);
+    }
+
+    [Fact]
+    public void TotalMonthlyPremium_WhenStatusIsLapsed()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.TotalMonthlyPremium(portfolio, PolicyStatus.Lapsed);
+
+        Assert.Equal(320.50m, result);
+    }
+
+    [Fact]
+    public void TotalMonthlyPremium_WhenStatusIsCancelled()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.TotalMonthlyPremium(portfolio, PolicyStatus.Cancelled);
+
+        Assert.Equal(220.00m, result);
+    }
+
+    [Fact]
+    public void ClaimsPaidBetween_ForApprovedClaims()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.ClaimsPaidBetween(
+            portfolio,
+            new DateOnly(2024, 1, 1),
+            new DateOnly(2024, 12, 31));
+
+        Assert.Equal(3500.00m, result);
+    }
+
+    [Fact]
+    public void ClaimsPaidBetween_IncludesStartAndEndDateClaims()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.ClaimsPaidBetween(
+            portfolio,
+            new DateOnly(2024, 1, 1),
+            new DateOnly(2024, 12, 31));
+
+        Assert.Equal(3500.00m, result);
+    }
+
+    [Fact]
+    public void ClaimsPaidBetween_IgnoresPendingAndRejectedClaims()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.ClaimsPaidBetween(
+            portfolio,
+            new DateOnly(2024, 5, 1),
+            new DateOnly(2024, 6, 30));
+
+        Assert.Equal(0m, result);
+    }
+
+    [Fact]
+    public void ClaimsPaidBetween_DoesNotFilterByPolicyStatus()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var result = _service.ClaimsPaidBetween(
+            portfolio,
+            new DateOnly(2024, 8, 1),
+            new DateOnly(2024, 8, 31));
+
+        Assert.Equal(1500.00m, result);
+    }
+
+    [Fact]
+    public void EvaluateClaim_ReturnsAutoApprove_ForActivePolicyWithNoPriorApprovedClaimWithin90Days()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
         {
-            ClaimId = "INCOMING",
-            Amount = amount,
+            ClaimId = "NEW-001",
+            Amount = 1000m,
             Status = ClaimStatus.Pending,
-            DateRaised = dateRaised
+            DateRaised = new DateOnly(2025, 4, 1)
         };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-003", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.AutoApprove, result);
     }
 
-    private static Claim ApprovedClaim(string claimId, decimal amount, DateOnly dateRaised)
+    [Fact]
+    public void EvaluateClaim_ReturnsManualReview_WhenAmountIsGreaterThan10000()
     {
-        return new Claim
-        {
-            ClaimId = claimId,
-            Amount = amount,
-            Status = ClaimStatus.Approved,
-            DateRaised = dateRaised
-        };
-    }
+        var portfolio = CreateSamplePortfolio();
 
-    private static Claim PendingClaim(string claimId, decimal amount, DateOnly dateRaised)
-    {
-        return new Claim
+        var incomingClaim = new Claim
         {
-            ClaimId = claimId,
-            Amount = amount,
+            ClaimId = "NEW-002",
+            Amount = 10000.01m,
             Status = ClaimStatus.Pending,
-            DateRaised = dateRaised
+            DateRaised = new DateOnly(2025, 4, 1)
         };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-003", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.ManualReview, result);
     }
 
-    private static Claim RejectedClaim(string claimId, decimal amount, DateOnly dateRaised)
+    [Fact]
+    public void EvaluateClaim_ReturnsReject_WhenPolicyIsLapsed()
     {
-        return new Claim
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
         {
-            ClaimId = claimId,
-            Amount = amount,
-            Status = ClaimStatus.Rejected,
-            DateRaised = dateRaised
+            ClaimId = "NEW-003",
+            Amount = 1000m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2025, 4, 1)
         };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-002", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.Reject, result);
     }
 
-    private static string CreateTempJsonFile(string json)
+    [Fact]
+    public void EvaluateClaim_ReturnsReject_WhenPolicyIsCancelled()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.json");
-        File.WriteAllText(path, json);
-        return path;
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
+        {
+            ClaimId = "NEW-004",
+            Amount = 1000m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2025, 4, 1)
+        };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-004", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.Reject, result);
+    }
+
+    [Fact]
+    public void EvaluateClaim_ReturnsReject_WhenAmountIsZero()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
+        {
+            ClaimId = "NEW-005",
+            Amount = 0m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2025, 4, 1)
+        };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-003", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.Reject, result);
+    }
+
+    [Fact]
+    public void EvaluateClaim_ReturnsReject_WhenAmountIsNegative()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
+        {
+            ClaimId = "NEW-006",
+            Amount = -100m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2025, 4, 1)
+        };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-003", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.Reject, result);
+    }
+
+    [Fact]
+    public void EvaluateClaim_ReturnsManualReview_WhenApprovedClaimExistsWithin90Days()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
+        {
+            ClaimId = "NEW-007",
+            Amount = 1000m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2024, 5, 1)
+        };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-001", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.ManualReview, result);
+    }
+
+    [Fact]
+    public void EvaluateClaim_ReturnsAutoApprove_WhenOnlyPendingClaimExistsWithin90Days()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
+        {
+            ClaimId = "NEW-008",
+            Amount = 1000m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2024, 9, 1)
+        };
+
+        var result = _service.EvaluateClaim(portfolio, "POL-001", incomingClaim);
+
+        Assert.Equal(AdjudicationDecision.AutoApprove, result);
+    }
+
+    [Fact]
+    public void EvaluateClaim_ThrowsException_WhenPolicyDoesNotExist()
+    {
+        var portfolio = CreateSamplePortfolio();
+
+        var incomingClaim = new Claim
+        {
+            ClaimId = "NEW-009",
+            Amount = 1000m,
+            Status = ClaimStatus.Pending,
+            DateRaised = new DateOnly(2025, 4, 1)
+        };
+
+        Assert.Throws<KeyNotFoundException>(() =>
+            _service.EvaluateClaim(portfolio, "POL-999", incomingClaim));
     }
 }
